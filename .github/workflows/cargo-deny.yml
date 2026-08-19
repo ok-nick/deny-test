@@ -149,9 +149,9 @@ jobs:
                 '',
                 'Update or patch the affected dependency, or add a scoped ignore to `deny.toml` with justification.',
                 '',
-                outputDetails,
-                '',
                 `Run: ${run}`,
+                '',
+                outputDetails,
               ].filter(l => l !== null).join('\n');
               await ensureIssue(title, body);
             }
@@ -175,9 +175,9 @@ jobs:
                 '',
                 'Fix the offending dependency, or adjust `deny.toml` (allow the license/source or add a scoped exception) with justification.',
                 '',
-                outputDetails,
-                '',
                 `Run: ${run}`,
+                '',
+                outputDetails,
               ].join('\n');
               await ensureIssue(title, body);
             }
@@ -187,8 +187,8 @@ jobs:
               await ensureIssue('Dependency audit (cargo-deny) is failing', [
                 `The dependency audit failed on \`${context.ref}\`, but no specific violation could be parsed from its output.`,
                 '',
-                outputDetails,
-                '',
                 `Run: ${run}`,
+                '',
+                outputDetails,
               ].join('\n'));
             }
