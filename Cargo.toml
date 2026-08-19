@@ -1,0 +1,19 @@
+[package]
+name = "deny-test"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Stand alone; this fixture is not part of the c2pa-rs workspace it lives next to.
+[workspace]
+
+# Intentionally vulnerable / non-compliant dependencies so cargo-deny reports
+# something. This crate is a demo for the dependency-audit workflow; it is not
+# meant to be built or used for anything real.
+[dependencies]
+# --- advisories (RUSTSEC) ---
+time = "=0.1.44"      # RUSTSEC-2020-0071 (potential segfault)
+smallvec = "=0.6.13"  # RUSTSEC-2021-0003 (buffer overflow)
+chrono = "=0.4.19"    # RUSTSEC-2020-0159 + pulls the vulnerable time 0.1
+ring = "=0.16.20"     # advisory + a non-SPDX license (see deny.toml)

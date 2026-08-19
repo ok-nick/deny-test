@@ -1,0 +1,40 @@
+# cargo-deny configuration for the dependency-audit demo. Kept deliberately
+# strict (no advisory ignores, no ring license clarification, one explicit ban)
+# so the audit reports a mix of advisories, license rejections, and a banned
+# crate.
+
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+]
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[bans]
+multiple-versions = "allow"
+# Demonstrate a bans violation: num-traits is pulled in transitively by chrono.
+deny = [
+  { name = "num-traits" },
+]
+
+[licenses]
+# Note: no clarification for `ring`, so its non-SPDX license is rejected.
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
