@@ -72,19 +72,16 @@ jobs:
       - name: Collect failing checks
         if: failure() && github.event_name != 'pull_request'
         run: |
+          # Human-readable output, embedded in a dropdown on each issue so the
+          # findings survive after the run log is deleted.
+          cargo deny check advisories bans licenses sources > deny.txt 2>&1 || true
+          # JSON, used to split the findings into individual issues.
           cargo deny --format json check advisories bans licenses sources \
             2> deny.ndjson 1>/dev/null || true
 
-          # Advisory errors (RUSTSEC): one issue each. `solution` and `graph` are
-          # captured so the issue stays useful after the run log is deleted.
+          # Advisory errors (RUSTSEC): one issue each.
           jq -c 'select(.type == "diagnostic" and .fields.severity == "error" and .fields.advisory != null)
-                 | {id: .fields.advisory.id,
-                    title: .fields.advisory.title,
-                    package: .fields.advisory.package,
-                    version: .fields.graphs[0]?.Krate.version,
-                    url: .fields.advisory.url,
-                    solution: ([.fields.notes[]? | select(startswith("Solution:"))] | .[0] // null),
-                    graph: .fields.graphs[0]}' \
+                 | {id: .fields.advisory.id, title: .fields.advisory.title, package: .fields.advisory.package, url: .fields.advisory.url}' \
             deny.ndjson \
             | jq -s 'unique_by(.id)' > advisories.json
 
@@ -112,6 +109,12 @@ jobs:
             const problems = JSON.parse(fs.readFileSync('problems.json', 'utf8'));
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
+            // The full cargo-deny output in a collapsed dropdown, so the issue is
+            // self-contained once the run log is gone. A 4-backtick fence keeps
+            // the ``` blocks in advisory descriptions from closing it early.
+            const output = fs.readFileSync('deny.txt', 'utf8');
+            const outputDetails = `<details><summary>cargo-deny output</summary>\n\n\`\`\`\`\n${output}\n\`\`\`\`\n\n</details>`;
+
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -133,41 +136,20 @@ jobs:
               console.log(`Opened: ${title}`);
             }
 
-            // Flatten cargo-deny's inverted dependency graph into "crate <- parent
-            // <- ... <- root" chains so the issue records how the crate is pulled
-            // in, independently of the (eventually deleted) run log.
-            function depPaths(node, cap = 6) {
-              if (!node || !node.Krate) return [];
-              const label = `${node.Krate.name} ${node.Krate.version}`;
-              const parents = node.parents || [];
-              if (parents.length === 0) return [label];
-              const out = [];
-              for (const parent of parents) {
-                for (const chain of depPaths(parent, cap)) {
-                  out.push(`${label} <- ${chain}`);
-                  if (out.length >= cap) return out;
-                }
-              }
-              return out;
-            }
-
             // One issue per RUSTSEC advisory.
             for (const advisory of advisories) {
               const title = `${advisory.id}: ${advisory.title}`;
               const rustsec = `https://rustsec.org/advisories/${advisory.id}.html`;
-              const crate = advisory.version ? `${advisory.package} ${advisory.version}` : advisory.package;
-              const paths = [...new Set(depPaths(advisory.graph))];
               const body = [
                 `The dependency audit is failing on \`${context.ref}\` because of [${advisory.id}](${rustsec}).`,
                 '',
-                `- Affected crate: \`${crate}\``,
-                advisory.solution ? `- ${advisory.solution}` : null,
+                `- Affected crate: \`${advisory.package}\``,
                 `- Advisory: ${rustsec}`,
                 advisory.url ? `- Upstream: ${advisory.url}` : null,
-                paths.length ? '' : null,
-                paths.length ? '<details><summary>Dependency paths</summary>\n\n```\n' + paths.join('\n') + '\n```\n\n</details>' : null,
                 '',
                 'Update or patch the affected dependency, or add a scoped ignore to `deny.toml` with justification.',
+                '',
+                outputDetails,
                 '',
                 `Run: ${run}`,
               ].filter(l => l !== null).join('\n');
@@ -193,6 +175,8 @@ jobs:
                 '',
                 'Fix the offending dependency, or adjust `deny.toml` (allow the license/source or add a scoped exception) with justification.',
                 '',
+                outputDetails,
+                '',
                 `Run: ${run}`,
               ].join('\n');
               await ensureIssue(title, body);
@@ -202,6 +186,8 @@ jobs:
             if (advisories.length === 0 && problems.length === 0) {
               await ensureIssue('Dependency audit (cargo-deny) is failing', [
                 `The dependency audit failed on \`${context.ref}\`, but no specific violation could be parsed from its output.`,
+                '',
+                outputDetails,
                 '',
                 `Run: ${run}`,
               ].join('\n'));
