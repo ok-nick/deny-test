@@ -75,9 +75,16 @@ jobs:
           cargo deny --format json check advisories bans licenses sources \
             2> deny.ndjson 1>/dev/null || true
 
-          # Advisory errors (RUSTSEC): one issue each.
+          # Advisory errors (RUSTSEC): one issue each. `solution` and `graph` are
+          # captured so the issue stays useful after the run log is deleted.
           jq -c 'select(.type == "diagnostic" and .fields.severity == "error" and .fields.advisory != null)
-                 | {id: .fields.advisory.id, title: .fields.advisory.title, package: .fields.advisory.package, url: .fields.advisory.url}' \
+                 | {id: .fields.advisory.id,
+                    title: .fields.advisory.title,
+                    package: .fields.advisory.package,
+                    version: .fields.graphs[0]?.Krate.version,
+                    url: .fields.advisory.url,
+                    solution: ([.fields.notes[]? | select(startswith("Solution:"))] | .[0] // null),
+                    graph: .fields.graphs[0]}' \
             deny.ndjson \
             | jq -s 'unique_by(.id)' > advisories.json
 
@@ -126,16 +133,39 @@ jobs:
               console.log(`Opened: ${title}`);
             }
 
+            // Flatten cargo-deny's inverted dependency graph into "crate <- parent
+            // <- ... <- root" chains so the issue records how the crate is pulled
+            // in, independently of the (eventually deleted) run log.
+            function depPaths(node, cap = 6) {
+              if (!node || !node.Krate) return [];
+              const label = `${node.Krate.name} ${node.Krate.version}`;
+              const parents = node.parents || [];
+              if (parents.length === 0) return [label];
+              const out = [];
+              for (const parent of parents) {
+                for (const chain of depPaths(parent, cap)) {
+                  out.push(`${label} <- ${chain}`);
+                  if (out.length >= cap) return out;
+                }
+              }
+              return out;
+            }
+
             // One issue per RUSTSEC advisory.
             for (const advisory of advisories) {
               const title = `${advisory.id}: ${advisory.title}`;
               const rustsec = `https://rustsec.org/advisories/${advisory.id}.html`;
+              const crate = advisory.version ? `${advisory.package} ${advisory.version}` : advisory.package;
+              const paths = [...new Set(depPaths(advisory.graph))];
               const body = [
                 `The dependency audit is failing on \`${context.ref}\` because of [${advisory.id}](${rustsec}).`,
                 '',
+                `- Affected crate: \`${crate}\``,
+                advisory.solution ? `- ${advisory.solution}` : null,
                 `- Advisory: ${rustsec}`,
-                `- Affected crate: \`${advisory.package}\``,
                 advisory.url ? `- Upstream: ${advisory.url}` : null,
+                paths.length ? '' : null,
+                paths.length ? '<details><summary>Dependency paths</summary>\n\n```\n' + paths.join('\n') + '\n```\n\n</details>' : null,
                 '',
                 'Update or patch the affected dependency, or add a scoped ignore to `deny.toml` with justification.',
                 '',
